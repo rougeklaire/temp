@@ -1,127 +1,102 @@
-import pandas as pd
-import seaborn as sns
+import pandas as pd 
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
-from sklearn.compose import ColumnTransformer
+import seaborn as sns
+import warnings
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix
 
-data = pd.read_csv("PATH_TO.CSV_FILE")
+data = pd.read_csv("/home/yt0rk/Desktop/Uni/TUM/MIUG/Project/Dataset/NC_policing.csv")
 
-#drop features not needed in the model
-droppable_features = ["state", "driver_race_raw", "stop_date"]
-data = data.drop(columns = droppable_features)
-
-# Handle missing values, dropping each row containing missing values from data
-data = data.dropna()
-
-#debugging
-""" def print_all_unique_pre():
-    for column in data.columns:
-        unique_values = data[column].unique()
-        print(f"{column}: {unique_values}")
-print_all_unique_pre() """
-
-# Convert categorical features to numerical using one-hot encoding
-categorical_features = ['driver_gender', 'driver_race', 'violation', 'search_type', 'contraband_found', "search_basis", "district"]  #officer_id?
-one_hot_encoder = OneHotEncoder(drop = "first")
-one_hot_encoded = one_hot_encoder.fit_transform(data[categorical_features])
-one_hot_encoded_df = pd.DataFrame(one_hot_encoded.toarray(), columns=one_hot_encoder.get_feature_names_out(categorical_features))
-
-#debugging
-""" print("-----START OF CHECK-------")
-def print_all_unique():
-    for column in label_encoded_df.columns:
-        unique_values = label_encoded_df[column].unique()
-        print(f"{column}: {unique_values}")
-print_all_unique()
-print("------END OF CHECK-----")
-
-print("Index of 'data':", data.index)
-print("Index of 'label_encoded_df':", label_encoded_df.index) """
+#missing value handling and choosing features
+data['drugs_related_stop'] = data['drugs_related_stop'].fillna('unknown') #too much data would be lost if rows just dropped
+data.dropna(subset=['driver_age'], inplace=True) #enough data left if missing value rows ignored
 
 
-# Drop original categorical columns and add encoded columns
-data = data.drop(columns = categorical_features)
+#state is same for all, driver_race_raw is a duplicate, date&district nonsenitive (not our focus here)
+#officer is kinda weird since do many values numerical ones that shouldn't have a weight
+#search basis is one step before the actual search that influences the outcome
 
-#debugging
-""" print("---- START OF DEBUG BEFORE CONCATENATING ----- /n")
-def print_all_unique():
-    for column in data.columns:
-        unique_values = data[column].unique()
-        print(f"{column}: {unique_values}")
-print_all_unique()
-print("/n ---- END OF DEBUG BEFORE CONCATENATING ----- /n") """
+X_raw = data.drop(columns=['stop_outcome','state', 'stop_date', 'driver_race_raw', 'district', 'officer_id', 'search_basis'])
+y_raw = data['stop_outcome']
 
-data.reset_index(drop=True, inplace=True)
+#encoding
+lencoder = LabelEncoder()
+y_encoded = lencoder.fit_transform(y_raw)
 
-data = pd.concat([data, one_hot_encoded_df], axis=1)
+gender_enc = lencoder.fit_transform(X_raw['driver_gender'])
 
-""" print("---- START OF DEBUG AFTER CONCATENATING ----- /n")
+#different data formats, use replacements
+X_drugs = X_raw[['drugs_related_stop']]
+replacements = {'unknown': 0, True :1}
+X_drugs = X_drugs.replace(replacements)
 
-def print_all_unique():
-    for column in data.columns:
-        unique_values = data[column].unique()
-        print(f"{column}: {unique_values}")
-print_all_unique()
+multicat_features = ['driver_race', 'violation', 'search_type'] #redefine without binary
 
-print("/n---- END OF DEBUG BEFORE CONCATENATING ----- /n") """
+X_multi = X_raw[multicat_features] 
+X_multi = pd.get_dummies(X_multi)
 
+#combine into encoded df
+X_encoded = X_raw.copy()
+X_encoded.driver_gender = gender_enc
+X_encoded.drugs_related_stop = X_drugs
 
-# Normalize numerical features
-numerical_features = ['driver_age']
+X_encoded = X_encoded.reset_index(drop=True)  # Reset index to start from 0
+X_multi = X_multi.reset_index(drop=True)      # Reset index to start from 0
+X_encoded = pd.concat([X_encoded, X_multi], axis=1) 
+X_encoded = X_encoded.drop(columns= multicat_features)
+
+#scale 
 scaler = StandardScaler()
-data[numerical_features] = scaler.fit_transform(data[numerical_features])
+X_encoded[['driver_age']] = scaler.fit_transform(X_encoded[['driver_age']])
 
-# Split the data into training and testing sets and implement logistic regression
-X = data.drop(columns=['stop_outcome'])
-#X = X.dropna()
+X_train, X_test, y_train, y_test = train_test_split(X_encoded, y_encoded, test_size=0.2, random_state=42)
 
-""" #debugging
-def print_all_unique():
-    for column in X.columns:
-        unique_values = X[column].unique()
-        print(f"{column}: {unique_values}")
-print_all_unique() """
-
-
-label_encoder = LabelEncoder()
-y = data['stop_outcome']
-y = label_encoder.fit_transform(data["stop_outcome"])
-
-#if necessary reformat "y" to a pandas dataframe
-#y = pd.DataFrame(data = y, columns = ["stop_outcome"])
-
-#y = y.dropna()
-
-""" #debugging
-print(np.unique(y)) """
-
-
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.2, random_state = 42)
-
-#ravel if pandas dataframe is used
-#y_train = y_train.values.ravel()
-#y_test = y_test.values.ravel()
-
-model = LogisticRegression(max_iter = 5000)
+#specify model & train
+model = LogisticRegression(max_iter=50000)
 model.fit(X_train, y_train)
 
 y_pred = model.predict(X_test)
 
-accuracy = accuracy_score(y_test, y_pred)
+#accuracy = accuracy_score(y_test, y_pred)
 
+#y_frequency = y.value_counts()
+#print(y_frequency)
 
+# Create plots to check model quality
 
+#print(f"Accuracy Score: {accuracy}")
 
+# Confusion matrix
+cm = confusion_matrix(y_test, y_pred)
+#sns.heatmap(conf_matrix, annot=True, fmt="d")
+#plt.xlabel("Predicted")
+#plt.ylabel("Actual")
+#plt.show()
 
-#create plots to check model quality
+TN = cm[0][0]
+FP = cm[0][1]
+FN = cm[1][0]
+TP = cm[1][1]
 
-#confusion matrix
-conf_matrix = confusion_matrix(y_test, y_pred)
-sns.heatmap(conf_matrix, annot = True, fmt = "d")
-plt.xlabel("Predicted")
-plt.ylabel("Actual")
-plt.show()
+# Accuracy
+accuracy = (TP + TN) / (TP + TN + FP + FN)
+print(f'Accuracy: {accuracy}')
+
+# Precision
+precision = TP / (TP + FP)
+print(f'Precision: {precision}')
+
+# Recall or Sensitivity
+recall = TP / (TP + FN)
+print(f'Recall: {recall}')
+
+# Specificity
+specificity = TN / (TN + FP)
+print(f'Specificity: {specificity}')
+
+# F1-Score
+f1 = 2 * (precision * recall) / (precision + recall)
+print(f'F1-Score: {f1}')
